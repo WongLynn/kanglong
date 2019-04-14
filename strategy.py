@@ -62,15 +62,13 @@ class KLYHStrategy(object):
             print(debug_msg + '-1.0')
             return -1.0
 
-        if (pe_quantile<0.3 and self._pb<1.5) or \
-           (pb_quantile<0.3 and self._pe<10) or \
+        if (pe_quantile<0.3 and pb_quantile<0.3) or \
            (pb_quantile<0.3 and 1.0/self._pe>national_debt_rate*3):
             position =  self.kelly(self._pe, avg_roe, national_debt_rate, action=1)
             print("{}{:.2f}".format(debug_msg, position))
             return position
 
-        if (pe_quantile>0.7 and self._pb>2) or \
-           (pb_quantile>0.7 and self._pe>25) or \
+        if (pe_quantile>0.7 and pb_quantile>0.7) or \
            (1.0/self._pe<national_debt_rate*2):
             position = self.kelly(self._pe, avg_roe, national_debt_rate, action=0)
             print("{}{:.2f}".format(debug_msg, position))
