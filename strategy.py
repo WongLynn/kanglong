@@ -3,6 +3,7 @@
 """这是一个用于joinquant的策略模板，适用于各类宽基指数"""
 
 # 导入函数库
+
 import bisect
 from jqdata import get_all_trade_days
 from datetime import datetime, timedelta
@@ -31,7 +32,7 @@ class KLYHStrategy(object):
             PB处于历史30%以下，且PE<10 或 1/PE<十年期国债利率X2，可以买入
 
         卖出条件:
-            市场出现系统性高估机会可以卖出 (市场整体60 PE，整体PB>5.5)，此时清仓(-100%)
+            市场出现系统性高估机会可以卖出 (市场整体50 PE，整体PB>4.5)，此时清仓(-100%)
             单一标的PE、PB 处于历史70%以上可以卖出
             PE处于历史70%以上，且PB>2可以卖出
             PB处于历史70%以上，且PE>25可以卖出
@@ -57,23 +58,24 @@ class KLYHStrategy(object):
         if self._pe<7.0 and self._pb<1.0 and self._pb/self._pe>0.18:
             print(debug_msg + '1.0')
             return 1.0
-        if self._pe>60.0 or self._pb>5.5:
+        if self._pe>50.0 or self._pb>4.5:
             print(debug_msg + '-1.0')
             return -1.0
 
         if (pe_quantile<0.3 and self._pb<1.5) or \
            (pb_quantile<0.3 and self._pe<10) or \
-           (pb_quantile<0.3 and 1.0/self._pe<national_debt_rate*2):
-            position =  self.kelly(self._pe, pe_quantile, national_debt_rate, action=1)
+           (pb_quantile<0.3 and 1.0/self._pe>national_debt_rate*3):
+            position =  self.kelly(self._pe, avg_roe, national_debt_rate, action=1)
             print("{}{:.2f}".format(debug_msg, position))
             return position
 
         if (pe_quantile>0.7 and self._pb>2) or \
            (pb_quantile>0.7 and self._pe>25) or \
-           (1.0/self._pe<national_debt_rate*3):
-            position = self.kelly(self._pe, pe_quantile, national_debt_rate, action=0)
+           (1.0/self._pe<national_debt_rate*2):
+            position = self.kelly(self._pe, avg_roe, national_debt_rate, action=0)
             print("{}{:.2f}".format(debug_msg, position))
             return position
+        return 0
 
     def kelly(self, pe, history_avg_roe, national_debt_rate, action=1):
         """
@@ -100,7 +102,7 @@ class KLYHStrategy(object):
             elif pe_quantile>=0.9 and pe_quantile<0.95:
                 return -0.6
             elif pe_quantile>=0.95:
-                return -0.8
+                return -1
             return 0
         else:
             odds = pow(1 + self.EXPECTED_EARN_RATE, self.EXPECTED_EARN_YEAR)
@@ -108,7 +110,7 @@ class KLYHStrategy(object):
 
             win_rate = 1.0 - self._index_stock.get_quantile_of_history_factors(except_sell_pe,
                                                                                self._history_factors['pe'])
-            print('平均ROE:{},期待PE:{}, 胜率:{}, 赔率:{}'.format(history_avg_roe, except_sell_pe, win_rate, odds))
+            print('历史平均roe:{},期待pe:{}, 胜率:{}, 赔率:{}'.format(history_avg_roe, except_sell_pe, win_rate, odds))
 
             position = (odds * win_rate - (1.0 - win_rate)) * 1.0 / odds
             return position if position > 0 else 0
@@ -162,14 +164,16 @@ class IndexStockBeta(object):
 
         df = df[df['pe_ratio']>0]
 
-        if(self._index_type == 0):
-            pe = df['circulating_market_cap'].sum() / (df['circulating_market_cap']/df['pe_ratio']).sum()
-            pb = df['circulating_market_cap'].sum() / (df['circulating_market_cap']/df['pb_ratio']).sum()
+        if len(df)>0:
+            if(self._index_type == 0):
+                pe = df['circulating_market_cap'].sum() / (df['circulating_market_cap']/df['pe_ratio']).sum()
+                pb = df['circulating_market_cap'].sum() / (df['circulating_market_cap']/df['pb_ratio']).sum()
+            else:
+                pe = df['pe_ratio'].size / (1/df['pe_ratio']).sum()
+                pb = df['pb_ratio'].size / (1/df['pb_ratio']).sum()
+            return (pe, pb, pb/pe)
         else:
-            pe = df['pe_ratio'].size / (1/df['pe_ratio']).sum()
-            pb = df['pb_ratio'].size / (1/df['pb_ratio']).sum()
-
-        return (pe, pb, pb/pe)
+            return (None, None, None)
 
     def get_index_beta_history_factors(self, interval=7):
         """
@@ -202,10 +206,11 @@ class IndexStockBeta(object):
                 continue
 
             pe, pb, roe = self.get_index_beta_factor(day)
-            pes.append(pe)
-            pbs.append(pb)
-            roes.append(roe)
-            days.append(day)
+            if pe and pb and roe:
+                pes.append(pe)
+                pbs.append(pb)
+                roes.append(roe)
+                days.append(day)
 
         result = pd.DataFrame({'pe':pes,'pb':pbs, 'roe':roes}, index=days)
         return result
@@ -230,14 +235,15 @@ class IndexStockBeta(object):
             return 1.0
 
 
-TOTAL_CASH = 100000
-UNIT_CASH = TOTAL_CASH / 20
+TOTAL_CASH = 50000
+UNIT_CASH = TOTAL_CASH / 50
+
+INDEX_STOCK = '000300.XSHG'
 
 # =============================================================
 # 初始化函数，设定基准等等
 def initialize(context):
-    # 设定沪深300作为基准
-    set_benchmark('000300.XSHG')
+    set_benchmark(INDEX_STOCK)
     # 开启动态复权模式(真实价格)
     set_option('use_real_price', True)
 
@@ -257,11 +263,11 @@ def initialize(context):
 
     ## 运行函数（reference_security为运行时间的参考标的；传入的标的只做种类区分，因此传入'000300.XSHG'或'510300.XSHG'是一样的）
       # 开盘前运行
-    run_daily(before_market_open, time='before_open', reference_security='000300.XSHG')
+    run_daily(before_market_open, time='before_open', reference_security=INDEX_STOCK )
       # 开盘时或每分钟开始时运行
-    run_daily(market_open, time='every_bar', reference_security='000300.XSHG')
+    run_daily(market_open, time='every_bar', reference_security=INDEX_STOCK )
       # 收盘后运行
-    run_daily(after_market_close, time='after_close', reference_security='000300.XSHG')
+    run_daily(after_market_close, time='after_close', reference_security=INDEX_STOCK )
 
     run_daily(weekly, time='every_bar')
 
@@ -288,35 +294,32 @@ def weekly(context):
     cash = context.portfolio.available_cash
     fund_value =  context.portfolio.total_value - cash
 
+    print("cash:{}, fund_value:{}".format(cash, fund_value))
+
     if fund_value > 0:
         fund_amount = context.portfolio.positions[g.security].closeable_amount
         fund_unit_value = fund_value / fund_amount
     else:
         fund_amount = 0
 
-    if cash <= 10:
-        # 木有钱
-        return
-
     current_date = context.current_dt.strftime("%Y-%m-%d")
-    stock = IndexStockBeta('000300.XSHG', base_date=current_date)
+    stock = IndexStockBeta(INDEX_STOCK, base_date=current_date, history_days=5*365)
     stragety = KLYHStrategy(stock)
     position = stragety.get_trading_position()
 
-    if position > 0:
+    if position > 0 and cash > 10:
         if cash >= UNIT_CASH*position:
             purchase(g.security, UNIT_CASH*position)
         else:
             purchase(g.security, cash)
     elif position < 0:
-        if fund_value > (0-TOTAL_CASH*position):
-            redeem(g.security, int((0-TOTAL_CASH*position)/fund_unit_value))
-        elif fund_value > 1:
-            redeem(g.security, fund_amount)
+        if fund_value > 0:
+            redeem(g.security, int((0-fund_value*position)/fund_unit_value))
         else:
             pass
     else:
         print('HOLDING')
+
 
 def period(context):
     pass
