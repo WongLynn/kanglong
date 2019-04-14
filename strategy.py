@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 
-"""这是一个用于joinquant的策略模板，适用于各类宽基指数"""
-
 # 导入函数库
 
 import bisect
@@ -78,7 +76,7 @@ class KLYHStrategy(object):
     def kelly(self, pe, history_avg_roe, national_debt_rate, action=1):
         """
         买入时用凯利公式计算仓位：https://happy123.me/blog/2019/04/08/zhi-shu-tou-zi-ce-lue/
-        卖出时简单的用 70% 清仓1成， 80%清仓2成，90%清仓3成
+        卖出时简单的用 70% 清仓0.5成， 80%清仓2成，90%清仓3成
 
         input:
             pe: 当前pe
@@ -94,7 +92,7 @@ class KLYHStrategy(object):
 
         if action == 0:
             if pe_quantile>=0.7 and pe_quantile<0.8:
-                return -0.1
+                return -0.05
             elif pe_quantile>=0.8 and pe_quantile<0.9:
                 return -0.3
             elif pe_quantile>=0.9 and pe_quantile<0.95:
@@ -269,18 +267,18 @@ def initialize(context):
 
     run_daily(weekly, time='every_bar')
 
-    # 华夏沪深300联结
-    g.security = '000051.OF'
+    # 嘉实沪深300增强
+    g.security = '000176.OF'
 
-## 开盘前运行函数
+# 开盘前运行函数
 def before_market_open(context):
     pass
 
-## 开盘时运行函数
+# 开盘时运行函数
 def market_open(context):
     pass
 
-## 收盘后运行函数
+# 收盘后运行函数
 def after_market_close(context):
     pass
 
@@ -290,15 +288,14 @@ def weekly(context):
         return
 
     cash = context.portfolio.available_cash
-    fund_value =  context.portfolio.total_value - cash
-
-    print("cash:{}, fund_value:{}".format(cash, fund_value))
+    fund_value =  context.portfolio.positions_value
 
     if fund_value > 0:
         fund_amount = context.portfolio.positions[g.security].closeable_amount
-        fund_unit_value = fund_value / fund_amount
     else:
         fund_amount = 0
+
+    print("cash:{}, fund_value:{}, fund_amount:{}".format(cash, fund_value, fund_amount))
 
     current_date = context.current_dt.strftime("%Y-%m-%d")
     stock = IndexStockBeta(INDEX_STOCK, base_date=current_date, history_days=5*365)
@@ -311,13 +308,12 @@ def weekly(context):
         else:
             purchase(g.security, cash)
     elif position < 0:
-        if fund_value > 0:
-            redeem(g.security, int((0-fund_value*position)/fund_unit_value))
+        if fund_amount > 0 and int(0-fund_amount*position) > 0:
+            redeem(g.security, int(0-fund_amount*position))
         else:
             pass
     else:
         print('HOLDING')
-
 
 def period(context):
     pass
