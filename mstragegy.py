@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
-"""低估值买入多指数组合策略"""
+"""低估值买入多指数组合策略
+   聚宽平台运行
+"""
 
 import bisect
 from jqdata import get_all_trade_days
@@ -60,7 +62,7 @@ class KLYHStrategy(object):
             print(debug_msg + '-1.0')
             return -1.0
 
-        if (pe_quantile<0.3 and pb_quantile<0.3) or \
+        if (pe_quantile<0.3 and pb_quantile<0.3 and self._pb<2) or \
            (pb_quantile<0.3 and 1.0/self._pe>national_debt_rate*3):
             position =  self.kelly(self._pe, avg_roe, national_debt_rate, action=1)
             print("{}{:.2f}".format(debug_msg, position))
@@ -250,6 +252,7 @@ INDEX_STOCKS = {
 TOTAL_CASH = 50000 * len(INDEX_STOCKS)
 UNIT_CASH = TOTAL_CASH / len(INDEX_STOCKS) / 50
 
+
 # =============================================================
 # 初始化函数，设定基准等等
 def initialize(context):
@@ -314,13 +317,6 @@ def weekly(context):
         stock = IndexStockBeta(stock_index, base_date=current_date, history_days=5*365)
         stragety = KLYHStrategy(stock)
         position = stragety.get_trading_position()
-
-        if stock_index == '000905.XSHG':
-            # 中证500仓位加倍
-            if position > 0:
-                position *= 2
-            else:
-                position /= 2
 
         if position > 0 and cash > 10:
             if cash >= UNIT_CASH*position:
