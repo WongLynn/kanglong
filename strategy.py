@@ -60,7 +60,7 @@ class KLYHStrategy(object):
             print(debug_msg + '-1.0')
             return -1.0
 
-        if (pe_quantile<0.3 and pb_quantile<0.3) or \
+        if (pe_quantile<0.3 and pb_quantile<0.3 and self._pb<2) or \
            (pb_quantile<0.3 and 1.0/self._pe>national_debt_rate*3):
             position =  self.kelly(self._pe, avg_roe, national_debt_rate, action=1)
             print("{}{:.2f}".format(debug_msg, position))
@@ -89,17 +89,23 @@ class KLYHStrategy(object):
 
         pe_quantile = self._index_stock.get_quantile_of_history_factors(
                                         pe, self._history_factors['pe'])
-
+        position = 0
         if action == 0:
             if pe_quantile>=0.7 and pe_quantile<0.8:
-                return -0.05
-            elif pe_quantile>=0.8 and pe_quantile<0.9:
-                return -0.3
+                position = -0.05
+            elif pe_quantile>=0.8 and pe_quantile<0.85:
+                position = -0.1
+            elif pe_quantile>=0.85 and pe_quantile<0.9:
+                position = -0.3
             elif pe_quantile>=0.9 and pe_quantile<0.95:
-                return -0.6
-            elif pe_quantile>=0.95:
-                return -1
-            return 0
+                position = -0.5
+            elif pe_quantile>=0.95 and pe_quantile<0.99:
+                position = -0.7
+            elif pe_quantile>=0.99:
+                position = -1
+            else:
+                pass
+            return position
         else:
             odds = pow(1 + self.EXPECTED_EARN_RATE, self.EXPECTED_EARN_YEAR)
             except_sell_pe = odds / pow(1+history_avg_roe, self.EXPECTED_EARN_YEAR) * pe
@@ -230,16 +236,25 @@ class IndexStockBeta(object):
         else:
             return 1.0
 
+BENCHMARK_INDEX_STOCK = '000300.XSHG'
+INDEX_STOCKS = {
+    '000300.XSHG':'163407.OF',    #163407.OF 兴全沪深300增强
+    '000905.XSHG':'161017.OF',    #161017.OF 富国中证500增强
+    '000919.XSHG':'519671.OF',    #519671.OF 银河300价值
+    '000922.XSHG':'100032.OF',    #100032.OF 富国中证红利
+    '399702.XSHE':'070023.OF',    #070023.OF 嘉实深F120基本面联接
+    #'399978.XSHE':'001550.OF',    #001550.OF 天弘中证医药100
+    #'399812.XSHE':'000968.OF'     #000968.OF 广发中证养老指数
+}
 
-TOTAL_CASH = 50000
-UNIT_CASH = TOTAL_CASH / 50
+TOTAL_CASH = 50000 * len(INDEX_STOCKS)
+UNIT_CASH = TOTAL_CASH / len(INDEX_STOCKS) / 50
 
-INDEX_STOCK = '000300.XSHG'
 
 # =============================================================
 # 初始化函数，设定基准等等
 def initialize(context):
-    set_benchmark(INDEX_STOCK)
+    set_benchmark(BENCHMARK_INDEX_STOCK)
     # 开启动态复权模式(真实价格)
     set_option('use_real_price', True)
 
@@ -259,26 +274,23 @@ def initialize(context):
 
     ## 运行函数（reference_security为运行时间的参考标的；传入的标的只做种类区分，因此传入'000300.XSHG'或'510300.XSHG'是一样的）
       # 开盘前运行
-    run_daily(before_market_open, time='before_open', reference_security=INDEX_STOCK )
+    run_daily(before_market_open, time='before_open', reference_security=BENCHMARK_INDEX_STOCK )
       # 开盘时或每分钟开始时运行
-    run_daily(market_open, time='every_bar', reference_security=INDEX_STOCK )
+    run_daily(market_open, time='every_bar', reference_security=BENCHMARK_INDEX_STOCK )
       # 收盘后运行
-    run_daily(after_market_close, time='after_close', reference_security=INDEX_STOCK )
+    run_daily(after_market_close, time='after_close', reference_security=BENCHMARK_INDEX_STOCK )
 
     run_daily(weekly, time='every_bar')
 
-    # 嘉实沪深300增强
-    g.security = '000176.OF'
-
-# 开盘前运行函数
+## 开盘前运行函数
 def before_market_open(context):
     pass
 
-# 开盘时运行函数
+## 开盘时运行函数
 def market_open(context):
     pass
 
-# 收盘后运行函数
+## 收盘后运行函数
 def after_market_close(context):
     pass
 
@@ -287,33 +299,35 @@ def weekly(context):
         # 不在周二, 跳过执行
         return
 
-    cash = context.portfolio.available_cash
-    fund_value =  context.portfolio.positions_value
+    for stock_index, stock_fund in INDEX_STOCKS.items():
+        fund_info = get_fund_info(stock_fund)
+        cash = context.portfolio.available_cash
+        fund_value =  context.portfolio.positions_value
 
-    if fund_value > 0:
-        fund_amount = context.portfolio.positions[g.security].closeable_amount
-    else:
-        fund_amount = 0
-
-    print("cash:{}, fund_value:{}, fund_amount:{}".format(cash, fund_value, fund_amount))
-
-    current_date = context.current_dt.strftime("%Y-%m-%d")
-    stock = IndexStockBeta(INDEX_STOCK, base_date=current_date, history_days=5*365)
-    stragety = KLYHStrategy(stock)
-    position = stragety.get_trading_position()
-
-    if position > 0 and cash > 10:
-        if cash >= UNIT_CASH*position:
-            purchase(g.security, UNIT_CASH*position)
+        if fund_value > 0:
+            fund_amount = context.portfolio.positions[stock_fund].closeable_amount
         else:
-            purchase(g.security, cash)
-    elif position < 0:
-        if fund_amount > 0 and int(0-fund_amount*position) > 0:
-            redeem(g.security, int(0-fund_amount*position))
+            fund_amount = 0
+
+        print("cash:{}, fund:{}, fund_value:{}, fund_amount:{}".format(cash, fund_info['fund_name'], fund_value, fund_amount))
+
+        current_date = context.current_dt.strftime("%Y-%m-%d")
+        stock = IndexStockBeta(stock_index, base_date=current_date, history_days=5*365)
+        stragety = KLYHStrategy(stock)
+        position = stragety.get_trading_position()
+
+        if position > 0 and cash > 10:
+            if cash >= UNIT_CASH*position:
+                purchase(stock_fund, UNIT_CASH*position)
+            else:
+                purchase(stock_fund, cash)
+        elif position < 0:
+            if fund_amount > 0 and int(0-fund_amount*position) > 0:
+                redeem(stock_fund, int(0-fund_amount*position))
+            else:
+                pass
         else:
-            pass
-    else:
-        print('HOLDING')
+            print('HOLDING')
 
 def period(context):
     pass
